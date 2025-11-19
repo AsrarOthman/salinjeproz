@@ -1,23 +1,50 @@
-name: Lite Test SSH
+name: Deploy AO
 
 on:
-  workflow_dispatch:
+  push:
+    branches: ["main"]
 
 jobs:
-  test-ssh:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Add SSH key
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Create TAR package
+        run: |
+          TS=$(date +%s)
+          TAR="dist_$TS.tar.gz"
+          tar -czf $TAR -C dist .
+          echo "TAR=$TAR" >> $GITHUB_ENV
+
+      # ===========================================
+      # SSH Direct ke VPS — gunakan KEY YANG ELOK
+      # ===========================================
+      - name: Setup SSH to VPS
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          printf "%s" "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -T 5 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Test SSH
+      - name: Upload build to VPS
         run: |
-          ssh -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} "echo 'Connected from GitHub Action ✔'"
+          scp -o StrictHostKeyChecking=no "./$TAR" root@${{ secrets.VPS_HOST }}:/root/
+
+      - name: Trigger deployment on VPS
+        run: |
+          ssh -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} \
+            "bash /root/deploy_from_vps.sh /root/$TAR"
