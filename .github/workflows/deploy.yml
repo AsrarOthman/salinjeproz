@@ -34,11 +34,11 @@ jobs:
         run: |
           mkdir -p ~/.ssh
 
-          # Decode base64 → private key
-          echo "${{ secrets.SSH_PRIVATE_KEY_BASE64 }}" | base64 -d > ~/.ssh/id_ed25519
+          # Decode base64 → PrivateKey (MESTI gunakan printf)
+          printf "%s" "${{ secrets.SSH_PRIVATE_KEY_BASE64 }}" | base64 -d > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-          # Add VPS + Target VM to known hosts (ignore errors)
+          # Add host keys (ignore errors)
           ssh-keyscan -T 5 -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
           ssh-keyscan -T 5 -H "${{ secrets.TARGET_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
@@ -47,25 +47,25 @@ jobs:
           TS=$(date +%s)
           TMP=/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS
 
-          # Create temp folder on TARGET VM
+          # 1️⃣ Create temp folder on TARGET VM
           ssh -o StrictHostKeyChecking=no \
               -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "mkdir -p $TMP"
 
-          # Upload build TAR via ProxyJump
+          # 2️⃣ Upload build TAR
           scp -o StrictHostKeyChecking=no \
               -o ProxyJump=${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ env.TAR }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/
 
-          # Extract TAR
+          # 3️⃣ Extract TAR
           ssh -o StrictHostKeyChecking=no \
               -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
 
-          # Run deploy script
+          # 4️⃣ Swap (symlink) to current
           ssh -o StrictHostKeyChecking=no \
               -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
