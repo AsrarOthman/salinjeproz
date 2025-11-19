@@ -27,14 +27,15 @@ jobs:
         run: |
           TS=$(date +%s)
           TAR="dist_$TS.tar.gz"
-          tar -czf "$TAR" -C dist .
-          echo "TAR=$TAR" >> "$GITHUB_ENV"
+          tar -czf $TAR -C dist .
+          echo "TAR=$TAR" >> $GITHUB_ENV
 
-      - name: Setup SSH (Private key inline for testing)
+      - name: Setup SSH (Inline private key for testing)
         run: |
           mkdir -p ~/.ssh
 
-          cat > ~/.ssh/id_ed25519 << 'EOF'
+          # 🔑 Inline Private Key
+          cat << 'EOF' > ~/.ssh/id_ed25519
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
 QyNTUxOQAAACA0D/xvV+FUvQ7aSueYx49UBx+K6/VMbfcUARV+s58u2wAAAJCi+7ipovu4
@@ -46,39 +47,36 @@ EOF
 
           chmod 600 ~/.ssh/id_ed25519
 
-          # Add Host keys
+          # Add VPS + VM host keys
           ssh-keyscan -T 5 -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
           ssh-keyscan -T 5 -H "${{ secrets.TARGET_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Deploy to server via ProxyJump
         run: |
-          echo "⚡ Starting Deploy..."
-
           TS=$(date +%s)
-          TMP="/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS"
-
+          TMP=/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS
           echo "📁 TMP folder: $TMP"
 
-          # Create folder in VM
+          # 1️⃣ Create temp folder on TARGET VM
           ssh -o StrictHostKeyChecking=no \
-              -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
-              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
+              -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "mkdir -p $TMP"
 
-          # Upload TAR
+          # 2️⃣ Upload TAR
           scp -o StrictHostKeyChecking=no \
-              -o ProxyJump="${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
-              "${{ env.TAR }}" \
-              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/"
+              -o ProxyJump=${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ env.TAR }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/
 
-          # Extract TAR
+          # 3️⃣ Extract TAR
           ssh -o StrictHostKeyChecking=no \
-              -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
-              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
+              -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
 
-          # Run deploy script
+          # 4️⃣ Swap live folder
           ssh -o StrictHostKeyChecking=no \
-              -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
-              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
+              -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "bash /home/${{ secrets.TARGET_USER }}/deploy_swap.sh $TMP"
