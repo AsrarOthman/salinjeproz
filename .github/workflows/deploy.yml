@@ -2,37 +2,58 @@ name: Deploy Vite React
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
 
       - run: npm ci
       - run: npm run build
 
-      - run: |
+      - name: Create TAR package
+        run: |
           TS=$(date +%s)
           TAR="dist_$TS.tar.gz"
           tar -czf $TAR -C dist .
           echo "TAR=$TAR" >> $GITHUB_ENV
 
-      - run: |
+      - name: Setup SSH for ProxyJump
+        run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.JUMP_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.TARGET_HOST }} >> ~/.ssh/known_hosts
 
-      - run: |
+      - name: Deploy to server via ProxyJump
+        run: |
           TS=$(date +%s)
-          TMP=/home/${{ secrets.SERVER_USER }}/deploy_tmp/$TS
-          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p $TMP"
-          scp ${{ env.TAR }} ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:$TMP/
-          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
-          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "bash /home/${{ secrets.SERVER_USER }}/deploy_swap.sh $TMP"
+          TMP=/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS
+
+          # Create tmp folder on target machine
+          ssh -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
+              "mkdir -p $TMP"
+
+          # Copy TAR file via proxy jump
+          scp -o ProxyJump=${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ env.TAR }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/
+
+          # Extract TAR on target
+          ssh -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
+              "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
+
+          # Run deploy script
+          ssh -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
+              "bash /home/${{ secrets.TARGET_USER }}/deploy_swap.sh $TMP"

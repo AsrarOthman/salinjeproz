@@ -106,7 +106,7 @@ const Dashboard = () => {
           }}
         >
           <a style={{ fontSize: "18px", fontWeight: "600" }}>
-            SalinJe.com - Buat Folder atau Salin Folder
+            SalinJe.com PRO- Buat Folder atau Salin Folder
           </a>
         </div>
         <br />
