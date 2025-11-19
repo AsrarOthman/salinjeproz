@@ -1,4 +1,4 @@
-name: Deploy Vite React
+name: Deploy Vite AO
 
 on:
   push:
@@ -36,7 +36,7 @@ jobs:
       - name: Setup SSH for VPS
         run: |
           mkdir -p ~/.ssh
-          printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          printf "%s" "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -T 5 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
@@ -57,7 +57,7 @@ jobs:
             root@${{ secrets.VPS_HOST }}:/root/
 
       # ================================================
-      # Trigger deploy script on VPS
+      # Trigger deploy script on VPS. VPS_SSH_KEY
       # ================================================
       - name: Run deploy script on VPS
         run: |
