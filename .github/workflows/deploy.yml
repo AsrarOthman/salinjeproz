@@ -12,7 +12,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -30,54 +30,21 @@ jobs:
           tar -czf $TAR -C dist .
           echo "TAR=$TAR" >> $GITHUB_ENV
 
-      ###############################################
-      # STEP: SSH SETUP + HOST FINGERPRINT FIX
-      ###############################################
-      - name: Setup SSH for ProxyJump (Base64 Decode)
+      # ===========================
+      # SSH Direct ke VPS (TIADA ProxyJump)
+      # ===========================
+      - name: Setup SSH to VPS
         run: |
           mkdir -p ~/.ssh
-
-          # Decode base64 → private key
-          printf "%s" "${{ secrets.SSH_PRIVATE_KEY_BASE64 }}" | base64 -d > ~/.ssh/id_ed25519
+          printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 5 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
-          # Add VPS host key
-          ssh-keyscan -T 5 -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
-
-          # Add VM (10.10.0.4) EXACT FINGERPRINT
-          echo "10.10.0.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILJlaeiz6jY7BxXB7MbUtEnze1aPOZsWCU42rwW5vf1U" >> ~/.ssh/known_hosts
-
-      ###############################################
-      # STEP: DEPLOY FLOW WITH PROXYJUMP
-      ###############################################
-      - name: Deploy to server via ProxyJump
+      - name: Upload build to VPS
         run: |
-          TS=$(date +%s)
-          TMP=/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS
+          scp -o StrictHostKeyChecking=no ./$(echo $TAR) root@${{ secrets.VPS_HOST }}:/root/
 
-          echo "📁 TMP folder: $TMP"
-
-          # 1️⃣ Create temp folder on TARGET VM (via VPS)x
-          ssh -o StrictHostKeyChecking=no \
-              -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
-              "mkdir -p $TMP"
-
-          # 2️⃣ Upload build TAR via ProxyJump
-          scp -o StrictHostKeyChecking=no \
-              -o ProxyJump=${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-              ${{ env.TAR }} \
-              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/
-
-          # 3️⃣ Extract TAR
-          ssh -o StrictHostKeyChecking=no \
-              -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
-              "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
-
-          # 4️⃣ Swap (symlink) to currentx
-          ssh -o StrictHostKeyChecking=no \
-              -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
-              "bash /home/${{ secrets.TARGET_USER }}/deploy_swap.sh $TMP"
-
+      - name: Trigger deployment on VPS
+        run: |
+          ssh -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} \
+            "bash /root/deploy_from_vps.sh /root/$TAR"
