@@ -9,57 +9,64 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Vite project
+      - name: Build project
         run: npm run build
 
       - name: Create TAR package
         run: |
           TS=$(date +%s)
           TAR="dist_$TS.tar.gz"
-          tar -czf "$TAR" -C dist .
+          tar -czf $TAR -C dist .
           echo "TAR=$TAR" >> $GITHUB_ENV
 
       - name: Setup SSH for ProxyJump
         run: |
           mkdir -p ~/.ssh
 
-          # Use printf instead of echo to avoid corrupting private key
+          # Write private key safely
           printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-          ssh-keyscan -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts
-          ssh-keyscan -H "${{ secrets.TARGET_HOST }}" >> ~/.ssh/known_hosts
+          # Add hosts to known_hosts (ignore errors)
+          ssh-keyscan -T 5 -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -T 5 -H "${{ secrets.TARGET_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Deploy to server via ProxyJump
         run: |
           TS=$(date +%s)
-          TMP="/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS"
+          TMP=/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS
 
-          # Create temp directory on target server
-          ssh -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
-              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
+          # Create temp folder on target server
+          ssh -o StrictHostKeyChecking=no \
+              -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "mkdir -p $TMP"
 
-          # Copy TAR file to target via ProxyJump
-          scp -o ProxyJump="${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
-              "${{ env.TAR }}" \
-              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/"
+          # Upload build package
+          scp -o StrictHostKeyChecking=no \
+              -o ProxyJump=${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ env.TAR }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/
 
-          # Extract files
-          ssh -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
-              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
+          # Extract + deploy
+          ssh -o StrictHostKeyChecking=no \
+              -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
 
-          # Run deploy script
-          ssh -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
-              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
+          # Run swap script
+          ssh -o StrictHostKeyChecking=no \
+              -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
+              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "bash /home/${{ secrets.TARGET_USER }}/deploy_swap.sh $TMP"
