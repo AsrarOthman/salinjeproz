@@ -15,40 +15,51 @@ jobs:
         with:
           node-version: "20"
 
-      - run: npm ci
-      - run: npm run build
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Vite project
+        run: npm run build
 
       - name: Create TAR package
         run: |
           TS=$(date +%s)
           TAR="dist_$TS.tar.gz"
-          tar -czf $TAR -C dist .
+          tar -czf "$TAR" -C dist .
           echo "TAR=$TAR" >> $GITHUB_ENV
 
       - name: Setup SSH for ProxyJump
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+
+          # Use printf instead of echo to avoid corrupting private key
+          printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ secrets.JUMP_HOST }} >> ~/.ssh/known_hosts
-          ssh-keyscan -H ${{ secrets.TARGET_HOST }} >> ~/.ssh/known_hosts
+
+          ssh-keyscan -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${{ secrets.TARGET_HOST }}" >> ~/.ssh/known_hosts
+
       - name: Deploy to server via ProxyJump
         run: |
           TS=$(date +%s)
-          TMP=/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS
+          TMP="/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS"
 
-          ssh -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
+          # Create temp directory on target server
+          ssh -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
+              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
               "mkdir -p $TMP"
 
-          scp -o ProxyJump=${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-              ${{ env.TAR }} \
-              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/
+          # Copy TAR file to target via ProxyJump
+          scp -o ProxyJump="${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
+              "${{ env.TAR }}" \
+              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/"
 
-          ssh -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
+          # Extract files
+          ssh -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
+              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
               "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
 
-          ssh -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
-              ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
+          # Run deploy script
+          ssh -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
+              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
               "bash /home/${{ secrets.TARGET_USER }}/deploy_swap.sh $TMP"
