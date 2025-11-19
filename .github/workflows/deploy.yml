@@ -30,15 +30,15 @@ jobs:
           tar -czf $TAR -C dist .
           echo "TAR=$TAR" >> $GITHUB_ENV
 
-      - name: Setup SSH for ProxyJump
+      - name: Setup SSH for ProxyJump (Base64 Decode)
         run: |
           mkdir -p ~/.ssh
 
-          # Write private key safely
-          printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          # Decode base64 → private key
+          echo "${{ secrets.SSH_PRIVATE_KEY_BASE64 }}" | base64 -d > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-          # Add hosts to known_hosts (ignore errors)
+          # Add VPS + Target VM to known hosts (ignore errors)
           ssh-keyscan -T 5 -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
           ssh-keyscan -T 5 -H "${{ secrets.TARGET_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
@@ -47,25 +47,25 @@ jobs:
           TS=$(date +%s)
           TMP=/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS
 
-          # Create temp folder on target server
+          # Create temp folder on TARGET VM
           ssh -o StrictHostKeyChecking=no \
               -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "mkdir -p $TMP"
 
-          # Upload build package
+          # Upload build TAR via ProxyJump
           scp -o StrictHostKeyChecking=no \
               -o ProxyJump=${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ env.TAR }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/
 
-          # Extract + deploy
+          # Extract TAR
           ssh -o StrictHostKeyChecking=no \
               -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
 
-          # Run swap script
+          # Run deploy script
           ssh -o StrictHostKeyChecking=no \
               -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
