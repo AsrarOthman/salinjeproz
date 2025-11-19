@@ -1,4 +1,4 @@
-name: Deploy AO
+name: Deploy Vite React
 
 on:
   push:
@@ -30,21 +30,36 @@ jobs:
           tar -czf $TAR -C dist .
           echo "TAR=$TAR" >> $GITHUB_ENV
 
-      # ===========================================
-      # SSH Direct ke VPS — gunakan KEY YANG ELOK
-      # ===========================================
-      - name: Setup SSH to VPS
+      # ================================================
+      # SSH Setup — same as test-ssh (INI YANG BERJAYA)
+      # ================================================
+      - name: Setup SSH for VPS
         run: |
           mkdir -p ~/.ssh
-          printf "%s" "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -T 5 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Upload build to VPS
+      # ================================================
+      # Install rsync (Fix bug: scp fail libcrypto)
+      # ================================================
+      - name: Install rsync
         run: |
-          scp -o StrictHostKeyChecking=no "./$TAR" root@${{ secrets.VPS_HOST }}:/root/
+          sudo apt-get update
+          sudo apt-get install -y rsync
 
-      - name: Trigger deployment on VPS
+      # ================================================
+      # Upload package via rsync (stable)
+      # ================================================
+      - name: Upload build file to VPS
+        run: |
+          rsync -e "ssh -o StrictHostKeyChecking=no" -avz "./${TAR}" \
+            root@${{ secrets.VPS_HOST }}:/root/
+
+      # ================================================
+      # Trigger deploy script on VPS
+      # ================================================
+      - name: Run deploy script on VPS
         run: |
           ssh -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} \
-            "bash /root/deploy_from_vps.sh /root/$TAR"
+            "bash /root/deploy_from_vps.sh /root/${TAR}"
