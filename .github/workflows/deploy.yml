@@ -30,40 +30,40 @@ jobs:
           tar -czf $TAR -C dist .
           echo "TAR=$TAR" >> $GITHUB_ENV
 
-      - name: Setup SSH (Inline private key for testing)
+      ###############################################
+      # STEP: SSH SETUP + HOST FINGERPRINT FIX
+      ###############################################
+      - name: Setup SSH for ProxyJump (Base64 Decode)
         run: |
           mkdir -p ~/.ssh
 
-          # 🔑 Inline Private Key
-          cat << 'EOF' > ~/.ssh/id_ed25519
------BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACA0D/xvV+FUvQ7aSueYx49UBx+K6/VMbfcUARV+s58u2wAAAJCi+7ipovu4
-qQAAAAtzc2gtZWQyNTUxOQAAACA0D/xvV+FUvQ7aSueYx49UBx+K6/VMbfcUARV+s58u2w
-AAAEBEFWjWcQvRMbcmezJSN1CKwu7fqtsc56A6FZjGnwV/kjQP/G9X4VS9DtpK55jHj1QH
-H4rr9Uxt9xQBFX6zny7bAAAADWdpdGh1Yi1kZXBsb3k=
------END OPENSSH PRIVATE KEY-----
-EOF
-
+          # Decode base64 → private key
+          printf "%s" "${{ secrets.SSH_PRIVATE_KEY_BASE64 }}" | base64 -d > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-          # Add VPS + VM host keys
+          # Add VPS host key
           ssh-keyscan -T 5 -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
-          ssh-keyscan -T 5 -H "${{ secrets.TARGET_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
+          # Add VM (10.10.0.4) EXACT FINGERPRINT
+          echo "10.10.0.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILJlaeiz6jY7BxXB7MbUtEnze1aPOZsWCU42rwW5vf1U" >> ~/.ssh/known_hosts
+
+      ###############################################
+      # STEP: DEPLOY FLOW WITH PROXYJUMP
+      ###############################################
       - name: Deploy to server via ProxyJump
         run: |
           TS=$(date +%s)
           TMP=/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS
+
           echo "📁 TMP folder: $TMP"
 
-          # 1️⃣ Create temp folder on TARGET VM
+          # 1️⃣ Create temp folder on TARGET VM (via VPS)x
           ssh -o StrictHostKeyChecking=no \
               -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "mkdir -p $TMP"
 
-          # 2️⃣ Upload TAR
+          # 2️⃣ Upload build TAR via ProxyJump
           scp -o StrictHostKeyChecking=no \
               -o ProxyJump=${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ env.TAR }} \
@@ -75,8 +75,9 @@ EOF
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
 
-          # 4️⃣ Swap live folder
+          # 4️⃣ Swap (symlink) to currentx
           ssh -o StrictHostKeyChecking=no \
               -J ${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }} \
               ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} \
               "bash /home/${{ secrets.TARGET_USER }}/deploy_swap.sh $TMP"
+
