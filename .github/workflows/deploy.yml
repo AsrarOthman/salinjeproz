@@ -6,28 +6,23 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
-      # 1) Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2) Setup Node
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # 3) Install dependencies
       - name: Install dependencies
         run: npm ci
 
-      # 4) Build project
       - name: Build project
         run: npm run build
 
-      # 5) Create TAR file
       - name: Create TAR package
         run: |
           TS=$(date +%s)
@@ -35,27 +30,8 @@ jobs:
           tar -czf $TAR -C dist .
           echo "TAR=$TAR" >> $GITHUB_ENV
 
-      # 6) Setup SSH direct ke VPS
-      - name: Setup SSH
+      - name: Deploy locally inside VPS
         run: |
-          mkdir -p ~/.ssh
-
-          # GUNA KEY YANG CONFIRM BOLEH: VPS_SSH_KEY
-          printf "%s" "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-
-          # Add VPS to known hosts
-          ssh-keyscan -T 5 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
-
-      # 7) Upload TAR ke VPS
-      - name: Upload build to VPS
-        run: |
-          scp -o StrictHostKeyChecking=no \
-            "./${TAR}" \
-            root@${{ secrets.VPS_HOST }}:/root/
-
-      # 8) Trigger deploy script dalam VPS
-      - name: Run deployment script on VPS
-        run: |
-          ssh -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} \
-            "bash /root/deploy_from_vps.sh /root/${TAR}"
+          mkdir -p /root/deploy_tmp/$TAR
+          tar -xzf "$TAR" -C /root/deploy_tmp/$TAR
+          bash /root/deploy_swap.sh "/root/deploy_tmp/$TAR"
