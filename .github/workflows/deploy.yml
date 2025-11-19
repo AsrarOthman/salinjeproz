@@ -1,4 +1,4 @@
-name: Deploy Vite AO
+name: Deploy Vite React
 
 on:
   push:
@@ -9,20 +9,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1) Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 2) Setup Node
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
+      # 3) Install dependencies
       - name: Install dependencies
         run: npm ci
 
+      # 4) Build project
       - name: Build project
         run: npm run build
 
+      # 5) Create TAR file
       - name: Create TAR package
         run: |
           TS=$(date +%s)
@@ -30,36 +35,27 @@ jobs:
           tar -czf $TAR -C dist .
           echo "TAR=$TAR" >> $GITHUB_ENV
 
-      # ================================================
-      # SSH Setup — same as test-ssh (INI YANG BERJAYA)
-      # ================================================
-      - name: Setup SSH for VPS
+      # 6) Setup SSH direct ke VPS
+      - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
+
+          # GUNA KEY YANG CONFIRM BOLEH: VPS_SSH_KEY
           printf "%s" "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+
+          # Add VPS to known hosts
           ssh-keyscan -T 5 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
-      # ================================================
-      # Install rsync (Fix bug: scp fail libcrypto)
-      # ================================================
-      - name: Install rsync
+      # 7) Upload TAR ke VPS
+      - name: Upload build to VPS
         run: |
-          sudo apt-get update
-          sudo apt-get install -y rsync
-
-      # ================================================
-      # Upload package via rsync (stable)
-      # ================================================
-      - name: Upload build file to VPS
-        run: |
-          rsync -e "ssh -o StrictHostKeyChecking=no" -avz "./${TAR}" \
+          scp -o StrictHostKeyChecking=no \
+            "./${TAR}" \
             root@${{ secrets.VPS_HOST }}:/root/
 
-      # ================================================
-      # Trigger deploy script on VPS. VPS_SSH_KEY
-      # ================================================
-      - name: Run deploy script on VPS
+      # 8) Trigger deploy script dalam VPS
+      - name: Run deployment script on VPS
         run: |
           ssh -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} \
             "bash /root/deploy_from_vps.sh /root/${TAR}"
