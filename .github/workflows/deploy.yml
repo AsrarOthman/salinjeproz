@@ -27,10 +27,10 @@ jobs:
         run: |
           TS=$(date +%s)
           TAR="dist_$TS.tar.gz"
-          tar -czf $TAR -C dist .
-          echo "TAR=$TAR" >> $GITHUB_ENV
+          tar -czf "$TAR" -C dist .
+          echo "TAR=$TAR" >> "$GITHUB_ENV"
 
-      - name: Setup SSH (HARDCODE PRIVATE KEY FOR TESTING)
+      - name: Setup SSH (Private key inline for testing)
         run: |
           mkdir -p ~/.ssh
 
@@ -46,36 +46,39 @@ EOF
 
           chmod 600 ~/.ssh/id_ed25519
 
-          ssh-keyscan -T 5 -H "160.250.92.59" >> ~/.ssh/known_hosts 2>/dev/null || true
-          ssh-keyscan -T 5 -H "10.10.0.4" >> ~/.ssh/known_hosts 2>/dev/null || true
+          # Add Host keys
+          ssh-keyscan -T 5 -H "${{ secrets.JUMP_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -T 5 -H "${{ secrets.TARGET_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Deploy to server via ProxyJump
         run: |
+          echo "⚡ Starting Deploy..."
+
           TS=$(date +%s)
-          TMP=/home/root/deploy_tmp/$TS
+          TMP="/home/${{ secrets.TARGET_USER }}/deploy_tmp/$TS"
 
           echo "📁 TMP folder: $TMP"
 
-          # 1️⃣ Create temp folder on TARGET VM
+          # Create folder in VM
           ssh -o StrictHostKeyChecking=no \
-              -J root@160.250.92.59 \
-              root@10.10.0.4 \
+              -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
+              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
               "mkdir -p $TMP"
 
-          # 2️⃣ Upload build TAR
+          # Upload TAR
           scp -o StrictHostKeyChecking=no \
-              -o ProxyJump=root@160.250.92.59 \
-              ${{ env.TAR }} \
-              root@10.10.0.4:$TMP/
+              -o ProxyJump="${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
+              "${{ env.TAR }}" \
+              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:$TMP/"
 
-          # 3️⃣ Extract TAR
+          # Extract TAR
           ssh -o StrictHostKeyChecking=no \
-              -J root@160.250.92.59 \
-              root@10.10.0.4 \
+              -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
+              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
               "tar -xzf $TMP/${{ env.TAR }} -C $TMP && rm $TMP/${{ env.TAR }}"
 
-          # 4️⃣ Swap to current
+          # Run deploy script
           ssh -o StrictHostKeyChecking=no \
-              -J root@160.250.92.59 \
-              root@10.10.0.4 \
-              "bash /home/root/deploy_swap.sh $TMP"
+              -J "${{ secrets.JUMP_USER }}@${{ secrets.JUMP_HOST }}" \
+              "${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}" \
+              "bash /home/${{ secrets.TARGET_USER }}/deploy_swap.sh $TMP"
